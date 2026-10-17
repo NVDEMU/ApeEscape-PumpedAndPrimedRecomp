@@ -12,7 +12,7 @@ permissions:
 
 concurrency:
   group: pumped-primed-desktop-builds
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   native-probe:
@@ -206,7 +206,7 @@ jobs:
           cd "$RUNNER_TEMP/ps2-web-recomp"
           if scripts/port.sh pumped-primed "$RUNNER_TEMP/pumped-primed.iso" \
               --native-only --frames 1800 --rounds 3 \
-              >"$RUNNER_TEMP/recomp-probe.log" 2>&1; then
+              2>&1 | tee "$RUNNER_TEMP/recomp-probe.log"; then
             echo "probe_exit=0" >> "$GITHUB_OUTPUT"
             echo "Native recompilation pipeline completed."
           else
@@ -265,6 +265,7 @@ jobs:
           path: ${{ runner.temp }}/pumped-primed-desktop-input.tar.gz.gpg
           if-no-files-found: error
           retention-days: 1
+          compression-level: 0
 
       - name: Offer encrypted ISO converted from the supplied CHD
         if: success()
@@ -287,6 +288,7 @@ jobs:
           path: ${{ runner.temp }}/pumped-primed-disc.iso.gz.gpg
           if-no-files-found: warn
           retention-days: 1
+          compression-level: 0
 
   build-macos:
     name: Build native macOS app (Metal)
@@ -399,6 +401,7 @@ jobs:
           path: ${{ runner.temp }}/ApeEscape-PumpedAndPrimed-macOS.dmg.gpg
           if-no-files-found: error
           retention-days: 1
+          compression-level: 0
 
   build-windows:
     name: Build native Windows app (Win32)
@@ -498,3 +501,4 @@ jobs:
           path: ${{ runner.temp }}/ApeEscape-PumpedAndPrimed-Windows.zip.gpg
           if-no-files-found: error
           retention-days: 1
+          compression-level: 0

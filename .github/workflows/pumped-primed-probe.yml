@@ -19,6 +19,7 @@ jobs:
     name: Download private CHD and test native recompilation
     runs-on: ubuntu-24.04
     timeout-minutes: 90
+    env:
       UPSTREAM_COMMIT: c628ae843209f6e4cef34ec04efb6267a1618882
     steps:
       - name: Check out project desktop patches and launchers

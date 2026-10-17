@@ -15,6 +15,7 @@ concurrency:
   group: pumped-primed-desktop-build-only
   cancel-in-progress: false
 
+jobs:
   build-macos:
     name: Build native macOS app (Metal)
     runs-on: macos-15

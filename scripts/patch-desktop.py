@@ -152,12 +152,12 @@ replace_once(
 
 replace_once(
     "CMakeLists.txt",
-    """        target_link_libraries(ps2runtime PUBLIC "\${PS2_WGPU_DIR}/lib/libwgpu_native.a" dl pthread m)
+    """        target_link_libraries(ps2runtime PUBLIC "${PS2_WGPU_DIR}/lib/libwgpu_native.a" dl pthread m)
         if(APPLE)
             target_link_libraries(ps2runtime PUBLIC "-framework Metal" "-framework QuartzCore" "-framework Foundation" "-framework CoreFoundation" "-framework IOKit" "-framework IOSurface" objc)
         endif()
 """,
-    """        target_link_libraries(ps2runtime PUBLIC "\${PS2_WGPU_DIR}/lib/libwgpu_native.a")
+    """        target_link_libraries(ps2runtime PUBLIC "${PS2_WGPU_DIR}/lib/libwgpu_native.a")
         if(APPLE)
             target_link_libraries(ps2runtime PUBLIC "-framework Metal" "-framework QuartzCore" "-framework Foundation" "-framework CoreFoundation" "-framework IOKit" "-framework IOSurface" objc)
         elseif(WIN32)

@@ -1,0 +1,16 @@
+# Never commit user-supplied game media
+*.chd
+*.iso
+*.bin
+*.cue
+*.7z
+*.zip
+
+# PS2 Web Recomp local output
+/generated/
+/build/
+/games/
+/tools/
+/third_party/wgpu-native/
+/assets/
+*.ps2

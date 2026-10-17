@@ -211,4 +211,25 @@ double resident_mb() {
 """
 )
 
-print("Applied native Metal/Win32 window and link portability patches.")
+
+replace_once(
+    "runtime/src/iop/libs.cpp",
+    "#include <cstdio>\n#include <deque>\n",
+    "#include <cstdio>\n#include <cstdlib>\n#include <deque>\n"
+)
+replace_once(
+    "runtime/include/ps2/vu_ops.hpp",
+    "    const v4i clamped = __builtin_elementwise_min((v4i)(x & 0x7FFFFFFFu), (v4i){0x7F7FFFFF, 0x7F7FFFFF, 0x7F7FFFFF, 0x7F7FFFFF});",
+    """    const v4i candidate = (v4i)(x & 0x7FFFFFFFu);
+    const v4i limit = (v4i){0x7F7FFFFF, 0x7F7FFFFF, 0x7F7FFFFF, 0x7F7FFFFF};
+    const v4i below = candidate < limit;
+    const v4i clamped = (candidate & below) | (limit & ~below);"""
+)
+replace_once(
+    "runtime/include/ps2/vu_ops.hpp",
+    "    if (__builtin_reduce_or((v4i)(x + 0x01000000u > 0x02000000u))) {",
+    """    const v4i needs_adjust = (v4i)(x + 0x01000000u > 0x02000000u);
+    if (needs_adjust[0] | needs_adjust[1] | needs_adjust[2] | needs_adjust[3]) {"""
+)
+
+print("Applied native Metal/Win32 surfaces, libc declarations, and portable vector reductions.")

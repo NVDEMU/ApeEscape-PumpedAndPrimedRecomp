@@ -149,35 +149,29 @@ jobs:
           import sys
           path = Path(sys.argv[1])
           source = path.read_text()
-          old = '''    def pvd(self, sector):
-          data = self.read(sector, 1)
-          if data[:6] != b'\\x01CD001':
-              sys.exit('not an ISO 9660 image: no primary volume descriptor at sector %d' % sector)
-          return data
-          '''
-          new = '''    def pvd(self, sector):
-          data = self.read(sector, 1)
-          if data[:6] == b'\\x01CD001':
-              return data
-          # ISO 9660 permits a boot-record descriptor before the PVD.
-          # Some PS2 images put the PVD after sector 16, so scan the early
-          # descriptor sequence instead of assuming sector 16 must be type 1.
-          if sector == 16:
-              found = []
-              for candidate in range(16, min(64, self.size // SECTOR)):
-                  data = self.read(candidate, 1)
-                  if data[1:6] == b'CD001':
-                      found.append((candidate, data[0], data[6]))
-                      if data[0] == 1 and data[6] == 1:
-                          print('ISO primary volume descriptor found at sector %d' % candidate, file=sys.stderr)
-                          return data
-              sys.exit('not an ISO 9660 image: no primary volume descriptor in sectors 16-63; descriptors: %s' % found)
-          sys.exit('not an ISO 9660 image: no primary volume descriptor at sector %d' % sector)
-          '''
-          if old not in source:
-              raise SystemExit("Could not safely patch the expected upstream ISO parser; upstream source may have changed.")
-          path.write_text(source.replace(old, new, 1))
-          print("Added PVD scan for a valid leading boot-record descriptor.")
+          start = source.index("    def pvd(self, sector):")
+          end = source.index("\n    def files(self):", start)
+          replacement = "\\n".join([
+              "    def pvd(self, sector):",
+              "        data = self.read(sector, 1)",
+              "        if data[:6] == b'\\\\x01CD001':",
+              "            return data",
+              "        # ISO 9660 permits a boot-record descriptor before the PVD.",
+              "        # Scan the early descriptor sequence instead of assuming sector 16 is type 1.",
+              "        if sector == 16:",
+              "            found = []",
+              "            for candidate in range(16, min(64, self.size // SECTOR)):",
+              "                data = self.read(candidate, 1)",
+              "                if data[1:6] == b'CD001':",
+              "                    found.append((candidate, data[0], data[6]))",
+              "                    if data[0] == 1 and data[6] == 1:",
+              "                        print('ISO primary volume descriptor found at sector %d' % candidate, file=sys.stderr)",
+              "                        return data",
+              "            sys.exit('not an ISO 9660 image: no primary volume descriptor in sectors 16-63; descriptors: %s' % found)",
+              "        sys.exit('not an ISO 9660 image: no primary volume descriptor at sector %d' % sector)",
+          ])
+          path.write_text(source[:start] + replacement + source[end:])
+          print("Patched ISO parser to scan valid volume descriptors in sectors 16-63.")
           PY
 
       - name: Recompile and run a short native compatibility probe

@@ -151,10 +151,10 @@ jobs:
           source = path.read_text()
           start = source.index("    def pvd(self, sector):")
           end = source.index("\n    def files(self):", start)
-          replacement = "\\n".join([
+          replacement = "\n".join([
               "    def pvd(self, sector):",
               "        data = self.read(sector, 1)",
-              "        if data[:6] == b'\\\\x01CD001':",
+              "        if data[:6] == b'\\x01CD001':",
               "            return data",
               "        # ISO 9660 permits a boot-record descriptor before the PVD.",
               "        # Scan the early descriptor sequence instead of assuming sector 16 is type 1.",

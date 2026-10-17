@@ -1,4 +1,4 @@
-name: Pumped & Primed native recomp probe
+name: Ape Escape: Pumped & Primed — Native Desktop Builds
 
 on:
   push:
@@ -11,7 +11,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: pumped-primed-probe
+  group: pumped-primed-desktop-builds
   cancel-in-progress: false
 
 jobs:
@@ -23,6 +23,9 @@ jobs:
       GAME_ASSETS_LINK: ${{ secrets.GAME_ASSETS_LINK }}
       UPSTREAM_COMMIT: c628ae843209f6e4cef34ec04efb6267a1618882
     steps:
+      - name: Check out project desktop patches and launchers
+        uses: actions/checkout@v4
+
       - name: Check required secret
         shell: bash
         run: |
@@ -39,7 +42,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install --no-install-recommends -y \
             build-essential clang cmake ninja-build python3 git \
-            megatools mame-tools pkg-config \
+            megatools mame-tools pkg-config gnupg \
             libsdl2-dev libvulkan-dev libx11-dev libxrandr-dev \
             libxinerama-dev libxcursor-dev libxi-dev libwayland-dev libxkbcommon-dev
 
@@ -191,6 +194,10 @@ jobs:
           git -C "$RUNNER_TEMP/ps2-web-recomp" checkout "$UPSTREAM_COMMIT"
           echo "Using upstream PS2 Web Recomp commit: $UPSTREAM_COMMIT"
 
+      - name: Apply native Metal and Win32 surface support
+        shell: bash
+        run: python3 "$GITHUB_WORKSPACE/scripts/patch-desktop.py" "$RUNNER_TEMP/ps2-web-recomp"
+
       - name: Recompile and run a short native compatibility probe
         id: probe
         shell: bash
@@ -226,3 +233,268 @@ jobs:
           fi
           echo
           echo "No CHD, ISO, generated game code, executable, screenshots, or game-derived build artifacts are uploaded."
+
+
+      - name: Prepare encrypted native build inputs
+        if: success()
+        shell: bash
+        run: |
+          set -euo pipefail
+          src="$RUNNER_TEMP/ps2-web-recomp"
+          test -s "$src/generated/pumped-primed"
+          test -s "$src/games/pumped-primed/disc/SLUS_210.96"
+
+          # The native apps ask the user to select an ISO at launch.
+          rm -f "$src/games/pumped-primed/disc.iso"
+          rm -rf "$src/.git" "$src/build" "$src/tools" "$src/third_party/wgpu-native"
+          rm -rf "$src/games/pumped-primed/shots" "$src/games/pumped-primed/vu1" "$src/games/pumped-primed/modules"
+          rm -f "$src/games/pumped-primed/explore.log" "$src/games/pumped-primed/explore.ps2" "$src/games/pumped-primed/misses.txt"
+
+          tar -czf "$RUNNER_TEMP/pumped-primed-desktop-input.tar.gz" -C "$RUNNER_TEMP" ps2-web-recomp
+          gpg --batch --yes --pinentry-mode loopback --passphrase "$GAME_ASSETS_LINK" \
+            --symmetric --cipher-algo AES256 --output "$RUNNER_TEMP/pumped-primed-desktop-input.tar.gz.gpg" \
+            "$RUNNER_TEMP/pumped-primed-desktop-input.tar.gz"
+          rm -f "$RUNNER_TEMP/pumped-primed-desktop-input.tar.gz"
+          echo "Native inputs encrypted before upload."
+
+      - name: Upload encrypted native build inputs
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pumped-primed-desktop-input-encrypted
+          path: ${{ runner.temp }}/pumped-primed-desktop-input.tar.gz.gpg
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Offer encrypted ISO converted from the supplied CHD
+        if: success()
+        shell: bash
+        run: |
+          set -euo pipefail
+          gzip -1 -c "$RUNNER_TEMP/pumped-primed.iso" > "$RUNNER_TEMP/pumped-primed.iso.gz"
+          gpg --batch --yes --pinentry-mode loopback --passphrase "$GAME_ASSETS_LINK" \
+            --symmetric --cipher-algo AES256 --compress-algo none \
+            --output "$RUNNER_TEMP/pumped-primed-disc.iso.gz.gpg" "$RUNNER_TEMP/pumped-primed.iso.gz"
+          rm -f "$RUNNER_TEMP/pumped-primed.iso.gz"
+          echo "The optional ISO is encrypted separately from the application builds."
+
+      - name: Upload optional encrypted ISO
+        if: success()
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: pumped-primed-disc-iso-encrypted
+          path: ${{ runner.temp }}/pumped-primed-disc.iso.gz.gpg
+          if-no-files-found: warn
+          retention-days: 1
+
+  build-macos:
+    name: Build native macOS app (Metal)
+    needs: native-probe
+    runs-on: macos-15
+    timeout-minutes: 120
+    env:
+      GAME_ASSETS_LINK: ${{ secrets.GAME_ASSETS_LINK }}
+    steps:
+      - name: Check out app launcher source
+        uses: actions/checkout@v4
+
+      - name: Download encrypted build inputs
+        uses: actions/download-artifact@v4
+        with:
+          name: pumped-primed-desktop-input-encrypted
+          path: ${{ runner.temp }}/desktop-input
+
+      - name: Install native macOS dependencies
+        shell: bash
+        run: brew install cmake ninja llvm sdl2 gnupg
+
+      - name: Decrypt and unpack native inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf '::add-mask::%s\n' "$GAME_ASSETS_LINK"
+          gpg --batch --yes --pinentry-mode loopback --passphrase "$GAME_ASSETS_LINK" \
+            --decrypt --output "$RUNNER_TEMP/pumped-primed-desktop-input.tar.gz" \
+            "$RUNNER_TEMP/desktop-input/pumped-primed-desktop-input.tar.gz.gpg"
+          mkdir -p "$RUNNER_TEMP/desktop-source"
+          tar -xzf "$RUNNER_TEMP/pumped-primed-desktop-input.tar.gz" -C "$RUNNER_TEMP/desktop-source"
+          rm -f "$RUNNER_TEMP/pumped-primed-desktop-input.tar.gz"
+
+      - name: Build native recompiled runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          src="$RUNNER_TEMP/desktop-source/ps2-web-recomp"
+          "$src/scripts/fetch_wgpu.sh" v29.0.1.1
+          export CXX="$(brew --prefix llvm)/bin/clang++"
+          build="$src/build/native-pumped-primed"
+          cmake -S "$src" -B "$build" -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_CXX_COMPILER="$CXX" \
+            -DCMAKE_CXX_FLAGS="-stdlib=libc++" \
+            -DSDL2_DIR="$(brew --prefix sdl2)/lib/cmake/SDL2" \
+            -DPS2_GENERATED="$src/generated/pumped-primed" \
+            -DPS2_WGPU_DIR="$src/third_party/wgpu-native"
+          cmake --build "$build" --target ps2run --parallel 3
+          test -x "$build/ps2run"
+
+      - name: Package macOS app and encrypt it
+        shell: bash
+        run: |
+          set -euo pipefail
+          src="$RUNNER_TEMP/desktop-source/ps2-web-recomp"
+          build="$src/build/native-pumped-primed"
+          stage="$RUNNER_TEMP/macos-package"
+          app="$stage/Ape Escape Pumped and Primed.app"
+          game="$app/Contents/Resources/Game"
+          mkdir -p "$app/Contents/MacOS" "$game"
+          cp "$build/ps2run" "$game/ps2run"
+          cp "$src/games/pumped-primed/disc/SLUS_210.96" "$game/SLUS_210.96"
+
+          sdl_load="$(otool -L "$game/ps2run" | sed -n 's/^[[:space:]]*\(.*libSDL2[^ ]*\.dylib\) (.*$/\1/p' | head -1)"
+          test -n "$sdl_load"
+          sdl_name="$(basename "$sdl_load")"
+          sdl_source="$(find "$(brew --prefix sdl2)/lib" -maxdepth 1 -name "$sdl_name" -print -quit)"
+          if [[ -z "$sdl_source" ]]; then
+            sdl_source="$(find "$(brew --prefix sdl2)/lib" -maxdepth 1 -name 'libSDL2*.dylib' -print -quit)"
+            sdl_name="$(basename "$sdl_source")"
+          fi
+          test -f "$sdl_source"
+          cp -L "$sdl_source" "$game/$sdl_name"
+          install_name_tool -change "$sdl_load" "@executable_path/$sdl_name" "$game/ps2run"
+
+          cat > "$app/Contents/Info.plist" <<'PLIST'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0"><dict>
+          <key>CFBundleExecutable</key><string>ApeEscapePumpedAndPrimed</string>
+          <key>CFBundleIdentifier</key><string>com.nvdemu.apeescape.pumpedandprimed.recomp</string>
+          <key>CFBundleName</key><string>Ape Escape Pumped and Primed</string>
+          <key>CFBundlePackageType</key><string>APPL</string>
+          <key>CFBundleVersion</key><string>0.1.0</string>
+          <key>CFBundleShortVersionString</key><string>0.1.0</string>
+          <key>LSMinimumSystemVersion</key><string>12.0</string>
+          <key>NSHighResolutionCapable</key><true/>
+          </dict></plist>
+          PLIST
+
+          "$CXX" -std=c++20 -O2 -fobjc-arc -framework Cocoa \
+            "$GITHUB_WORKSPACE/packaging/macos_launcher.mm" \
+            -o "$app/Contents/MacOS/ApeEscapePumpedAndPrimed"
+          chmod +x "$app/Contents/MacOS/ApeEscapePumpedAndPrimed"
+          codesign --force --deep --sign - "$app"
+
+          dmg="$RUNNER_TEMP/ApeEscape-PumpedAndPrimed-macOS.dmg"
+          hdiutil create -volname "Ape Escape Pumped and Primed" -srcfolder "$app" -ov -format UDZO "$dmg"
+          gpg --batch --yes --pinentry-mode loopback --passphrase "$GAME_ASSETS_LINK" \
+            --symmetric --cipher-algo AES256 --output "$RUNNER_TEMP/ApeEscape-PumpedAndPrimed-macOS.dmg.gpg" "$dmg"
+          rm -f "$dmg"
+          echo "Encrypted native macOS DMG is ready."
+
+      - name: Upload encrypted macOS app
+        uses: actions/upload-artifact@v4
+        with:
+          name: pumped-primed-macos-app-encrypted
+          path: ${{ runner.temp }}/ApeEscape-PumpedAndPrimed-macOS.dmg.gpg
+          if-no-files-found: error
+          retention-days: 1
+
+  build-windows:
+    name: Build native Windows app (Win32)
+    needs: native-probe
+    runs-on: windows-latest
+    timeout-minutes: 120
+    env:
+      GAME_ASSETS_LINK: ${{ secrets.GAME_ASSETS_LINK }}
+    steps:
+      - name: Check out app launcher source
+        uses: actions/checkout@v4
+
+      - name: Download encrypted build inputs
+        uses: actions/download-artifact@v4
+        with:
+          name: pumped-primed-desktop-input-encrypted
+          path: ${{ runner.temp }}\\desktop-input
+
+      - name: Set up MinGW UCRT64, SDL2, and GnuPG
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          install: >-
+            base-devel
+            mingw-w64-ucrt-x86_64-gcc
+            mingw-w64-ucrt-x86_64-cmake
+            mingw-w64-ucrt-x86_64-ninja
+            mingw-w64-ucrt-x86_64-SDL2
+            gnupg
+            zip
+
+      - name: Decrypt and unpack native inputs
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          printf '::add-mask::%s\n' "$GAME_ASSETS_LINK"
+          TEMP="$(cygpath -u "$RUNNER_TEMP")"
+          mkdir -p "$TEMP/desktop-source"
+          gpg --batch --yes --pinentry-mode loopback --passphrase "$GAME_ASSETS_LINK" \
+            --decrypt --output "$TEMP/pumped-primed-desktop-input.tar.gz" \
+            "$TEMP/desktop-input/pumped-primed-desktop-input.tar.gz.gpg"
+          tar -xzf "$TEMP/pumped-primed-desktop-input.tar.gz" -C "$TEMP/desktop-source"
+          rm -f "$TEMP/pumped-primed-desktop-input.tar.gz"
+
+      - name: Build native recompiled runner
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          TEMP="$(cygpath -u "$RUNNER_TEMP")"
+          src="$TEMP/desktop-source/ps2-web-recomp"
+          mkdir -p "$src/third_party/wgpu-native"
+          curl -fsSL "https://github.com/gfx-rs/wgpu-native/releases/download/v29.0.1.1/wgpu-windows-x86_64-gnu-release.zip" -o "$TEMP/wgpu-windows.zip"
+          unzip -q "$TEMP/wgpu-windows.zip" -d "$src/third_party/wgpu-native"
+          build="$src/build/native-pumped-primed"
+          cmake -S "$src" -B "$build" -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_CXX_COMPILER="$MINGW_PREFIX/bin/g++.exe" \
+            -DCMAKE_EXE_LINKER_FLAGS="-static -static-libgcc -static-libstdc++" \
+            -DCMAKE_PREFIX_PATH="$MINGW_PREFIX" \
+            -DPS2_GENERATED="$src/generated/pumped-primed" \
+            -DPS2_WGPU_DIR="$src/third_party/wgpu-native"
+          cmake --build "$build" --target ps2run --parallel 2
+          test -f "$build/ps2run.exe"
+
+      - name: Package Windows app and encrypt it
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          TEMP="$(cygpath -u "$RUNNER_TEMP")"
+          WS="$(cygpath -u "$GITHUB_WORKSPACE")"
+          src="$TEMP/desktop-source/ps2-web-recomp"
+          build="$src/build/native-pumped-primed"
+          stage="$TEMP/windows-package/Ape Escape Pumped and Primed"
+          mkdir -p "$stage"
+          cp "$build/ps2run.exe" "$stage/ps2run.exe"
+          cp "$src/games/pumped-primed/disc/SLUS_210.96" "$stage/SLUS_210.96"
+          cp "$MINGW_PREFIX/bin/SDL2.dll" "$stage/SDL2.dll"
+
+          "$MINGW_PREFIX/bin/g++.exe" -std=c++20 -O2 -municode -mwindows \
+            -static -static-libgcc -static-libstdc++ \
+            "$WS/packaging/windows_launcher.cpp" -o "$stage/ApeEscape-Pumped-And-Primed.exe" \
+            -lcomdlg32 -luser32
+
+          mkdir -p "$TEMP/windows-package"
+          (cd "$TEMP/windows-package" && zip -0 -r "$TEMP/ApeEscape-PumpedAndPrimed-Windows.zip" "Ape Escape Pumped and Primed")
+          gpg --batch --yes --pinentry-mode loopback --passphrase "$GAME_ASSETS_LINK" \
+            --symmetric --cipher-algo AES256 --output "$TEMP/ApeEscape-PumpedAndPrimed-Windows.zip.gpg" \
+            "$TEMP/ApeEscape-PumpedAndPrimed-Windows.zip"
+          rm -f "$TEMP/ApeEscape-PumpedAndPrimed-Windows.zip"
+          echo "Encrypted native Windows ZIP is ready."
+
+      - name: Upload encrypted Windows app
+        uses: actions/upload-artifact@v4
+        with:
+          name: pumped-primed-windows-app-encrypted
+          path: ${{ runner.temp }}/ApeEscape-PumpedAndPrimed-Windows.zip.gpg
+          if-no-files-found: error
+          retention-days: 1

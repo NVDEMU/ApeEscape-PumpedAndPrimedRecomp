@@ -13,6 +13,9 @@ extern char **environ;
 
 int main(int argc, char **argv) {
     @autoreleasepool {
+        [NSApplication sharedApplication];
+        [NSApp setActivationPolicy:NSApplicationActivationPolicyRegular];
+        [NSApp activateIgnoringOtherApps:YES];
         NSOpenPanel *panel = [NSOpenPanel openPanel];
         panel.canChooseFiles = YES;
         panel.canChooseDirectories = NO;

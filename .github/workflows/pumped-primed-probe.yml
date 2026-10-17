@@ -5,6 +5,8 @@ on:
     branches: [main]
     paths:
       - ".github/workflows/pumped-primed-probe.yml"
+      - "scripts/patch-desktop.py"
+      - "packaging/**"
   workflow_dispatch:
 
 permissions:
@@ -197,9 +199,14 @@ jobs:
           git -C "$RUNNER_TEMP/ps2-web-recomp" checkout "$UPSTREAM_COMMIT"
           echo "Using upstream PS2 Web Recomp commit: $UPSTREAM_COMMIT"
 
-      - name: Apply native Metal and Win32 surface support
+      - name: Apply native desktop portability patches
         shell: bash
-        run: python3 "$GITHUB_WORKSPACE/scripts/patch-desktop.py" "$RUNNER_TEMP/ps2-web-recomp"
+        run: |
+          set -euo pipefail
+          python3 "$GITHUB_WORKSPACE/scripts/patch-desktop.py" "$RUNNER_TEMP/ps2-web-recomp"
+          grep -q 'const v4i needs_adjust' "$RUNNER_TEMP/ps2-web-recomp/runtime/include/ps2/vu_ops.hpp"
+          grep -q '#include <cstdlib>' "$RUNNER_TEMP/ps2-web-recomp/runtime/src/iop/libs.cpp"
+          echo "Verified portable vector builtins and standard-library declarations."
 
       - name: Recompile and run a short native compatibility probe
         id: probe

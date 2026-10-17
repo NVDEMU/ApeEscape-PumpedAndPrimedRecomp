@@ -90,47 +90,98 @@ jobs:
           chmod 600 "$RUNNER_TEMP/pumped-primed.chd"
           echo "Private CHD downloaded to runner temp storage (size: $(stat -c '%s' "$RUNNER_TEMP/pumped-primed.chd") bytes)."
 
-      - name: Convert CHD to ISO
+      - name: Convert CHD to ISO with CD/DVD-aware handling
         shell: bash
         run: |
           set -euo pipefail
           chdman info -i "$RUNNER_TEMP/pumped-primed.chd" > "$RUNNER_TEMP/chd-info.txt"
-          # Pumped & Primed is expected to be a PS2 DVD image.
-          if ! chdman extractdvd -i "$RUNNER_TEMP/pumped-primed.chd" -o "$RUNNER_TEMP/pumped-primed.iso" >"$RUNNER_TEMP/chd-extract.log" 2>&1; then
-            echo "::error::CHD-to-DVD extraction failed; the file may not be a DVD CHD or may be invalid."
-            tail -n 30 "$RUNNER_TEMP/chd-extract.log" || true
-            cat "$RUNNER_TEMP/chd-info.txt" || true
-            exit 1
-          fi
+          echo "CHD media metadata:"
+          cat "$RUNNER_TEMP/chd-info.txt"
+
+          # DVD CHDs use 2048-byte units. This CHD reported 2448-byte
+          # MODE1 units (2352-byte raw sector plus 96-byte subchannel), so
+          # extract the CD track structure and strip each MODE1/2352 sector
+          # down to its 2048-byte ISO payload instead of using extractdvd.
+          unit_size="$(sed -n 's/^Unit Size:[[:space:]]*//p' "$RUNNER_TEMP/chd-info.txt" | head -1 | tr -d '[:space:]')"
+          case "$unit_size" in
+            2048)
+              if ! chdman extractdvd -i "$RUNNER_TEMP/pumped-primed.chd" -o "$RUNNER_TEMP/pumped-primed.iso" >"$RUNNER_TEMP/chd-extract.log" 2>&1; then
+                echo "::error::DVD extraction failed."
+                tail -n 40 "$RUNNER_TEMP/chd-extract.log" || true
+                exit 1
+              fi
+              ;;
+            2448|2352)
+              if ! chdman extractcd -i "$RUNNER_TEMP/pumped-primed.chd" -o "$RUNNER_TEMP/pumped-primed.cue" >"$RUNNER_TEMP/chd-extract.log" 2>&1; then
+                echo "::error::CD track extraction failed."
+                tail -n 40 "$RUNNER_TEMP/chd-extract.log" || true
+                exit 1
+              fi
+              python3 - "$RUNNER_TEMP/pumped-primed.cue" "$RUNNER_TEMP/pumped-primed.iso" <<'PY'
+          from pathlib import Path
+          import re, sys
+          cue = Path(sys.argv[1])
+          iso = Path(sys.argv[2])
+          text = cue.read_text(errors="replace")
+          files = re.findall(r'^\s*FILE\s+"([^"]+)"\s+BINARY\s*$', text, re.I | re.M)
+          tracks = re.findall(r'^\s*TRACK\s+\d+\s+(\S+)', text, re.I | re.M)
+          if len(files) != 1 or len(tracks) != 1:
+              raise SystemExit(f"Expected one data track/file in CUE; found {len(files)} file(s), {len(tracks)} track(s).")
+          mode = tracks[0].upper()
+          source = (cue.parent / files[0]).resolve()
+          if not source.is_file():
+              raise SystemExit(f"CUE-referenced binary not found: {source.name}")
+          idx = re.search(r'^\s*INDEX\s+01\s+(\d{2}):(\d{2}):(\d{2})\s*$', text, re.I | re.M)
+          if not idx:
+              raise SystemExit("CUE has no INDEX 01 timestamp for its data track.")
+          start_frame = (int(idx.group(1)) * 60 + int(idx.group(2))) * 75 + int(idx.group(3))
+          if mode == "MODE1/2048":
+              with source.open("rb") as src, iso.open("wb") as dst:
+                  src.seek(start_frame * 2048)
+                  while True:
+                      block = src.read(4 * 1024 * 1024)
+                      if not block:
+                          break
+                      dst.write(block)
+          elif mode == "MODE1/2352":
+              sector_size, data_offset, data_size = 2352, 16, 2048
+              size = source.stat().st_size
+              if size % sector_size:
+                  raise SystemExit(f"Raw MODE1 binary size {size} is not divisible by {sector_size}.")
+              sectors = size // sector_size
+              if start_frame >= sectors:
+                  raise SystemExit(f"CUE INDEX 01 starts at sector {start_frame}, beyond {sectors} sectors.")
+              with source.open("rb") as src, iso.open("wb") as dst:
+                  src.seek(start_frame * sector_size)
+                  for sector_num in range(start_frame, sectors):
+                      raw = src.read(sector_size)
+                      if len(raw) != sector_size:
+                          raise SystemExit(f"Short raw sector at LBA {sector_num}.")
+                      if sector_num == start_frame and raw[:12] != b"\x00" + b"\xff" * 10 + b"\x00":
+                          raise SystemExit("CUE says MODE1/2352, but first sector lacks a valid CD sync pattern.")
+                      dst.write(raw[data_offset:data_offset + data_size])
+          else:
+              raise SystemExit(f"Unsupported first-track mode {mode!r}; expected MODE1/2048 or MODE1/2352.")
+          if not iso.is_file() or iso.stat().st_size == 0:
+              raise SystemExit("ISO conversion produced no output.")
+          # Confirm a standard ISO9660 primary volume descriptor at LBA 16.
+          with iso.open("rb") as f:
+              f.seek(16 * 2048)
+              header = f.read(7)
+          if len(header) != 7 or header[0] != 1 or header[1:6] != b"CD001" or header[6] != 1:
+              raise SystemExit(f"Converted ISO still has no valid PVD at LBA 16: {header.hex()}")
+          print(f"Converted {mode} track to ISO ({iso.stat().st_size} bytes); PVD validated at LBA 16.")
+          PY
+              ;;
+            *)
+              echo "::error::Unsupported CHD unit size '$unit_size'; refusing to guess the disc layout."
+              exit 1
+              ;;
+          esac
           test -s "$RUNNER_TEMP/pumped-primed.iso"
           chmod 600 "$RUNNER_TEMP/pumped-primed.iso"
-          echo "CHD converted successfully (ISO size: $(stat -c '%s' "$RUNNER_TEMP/pumped-primed.iso") bytes)."
-          echo "CHD metadata:"
-          cat "$RUNNER_TEMP/chd-info.txt"
-          python3 - "$RUNNER_TEMP/pumped-primed.iso" <<'PY'
-          import os, sys
-          path = sys.argv[1]
-          sector_size = 2048
-          descriptors = []
-          with open(path, "rb") as f:
-              size = os.path.getsize(path)
-              for sector in range(16, min(64, size // sector_size)):
-                  f.seek(sector * sector_size)
-                  header = f.read(7)
-                  if len(header) == 7 and header[1:6] == b"CD001":
-                      descriptors.append((sector, header[0], header[6]))
-          print("ISO9660 volume descriptors in sectors 16-63:",
-                [(s, t, v) for s, t, v in descriptors])
-          if not any(t == 1 and v == 1 for _, t, v in descriptors):
-              with open(path, "rb") as f:
-                  f.seek(16 * sector_size)
-                  print("Sector-16 header bytes:", f.read(16).hex())
-              raise SystemExit(
-                  "No ISO9660 primary volume descriptor (type 1, CD001, version 1) "
-                  "found in sectors 16-63; see CHD metadata and header diagnostics above."
-              )
-          PY
-          rm -f "$RUNNER_TEMP/pumped-primed.chd"
+          echo "Disc image normalized to ISO9660 (size: $(stat -c '%s' "$RUNNER_TEMP/pumped-primed.iso") bytes)."
+          rm -f "$RUNNER_TEMP/pumped-primed.chd" "$RUNNER_TEMP/pumped-primed.cue" "$RUNNER_TEMP/pumped-primed.bin"
 
       - name: Fetch pinned PS2 Web Recomp toolchain
         shell: bash
@@ -139,40 +190,6 @@ jobs:
           git clone --filter=blob:none https://github.com/snuri00/ps2-web-recomp.git "$RUNNER_TEMP/ps2-web-recomp"
           git -C "$RUNNER_TEMP/ps2-web-recomp" checkout "$UPSTREAM_COMMIT"
           echo "Using upstream PS2 Web Recomp commit: $UPSTREAM_COMMIT"
-
-      - name: Handle a leading ISO boot-record descriptor
-        shell: bash
-        run: |
-          set -euo pipefail
-          python3 - "$RUNNER_TEMP/ps2-web-recomp/scripts/disc.py" <<'PY'
-          from pathlib import Path
-          import sys
-          path = Path(sys.argv[1])
-          source = path.read_text()
-          start = source.index("    def pvd(self, sector):")
-          end = source.index("\n    def files(self):", start)
-          replacement = "\n".join([
-              "    def pvd(self, sector):",
-              "        data = self.read(sector, 1)",
-              "        if data[:6] == b'\\x01CD001':",
-              "            return data",
-              "        # ISO 9660 permits a boot-record descriptor before the PVD.",
-              "        # Scan the early descriptor sequence instead of assuming sector 16 is type 1.",
-              "        if sector == 16:",
-              "            found = []",
-              "            for candidate in range(16, min(64, self.size // SECTOR)):",
-              "                data = self.read(candidate, 1)",
-              "                if data[1:6] == b'CD001':",
-              "                    found.append((candidate, data[0], data[6]))",
-              "                    if data[0] == 1 and data[6] == 1:",
-              "                        print('ISO primary volume descriptor found at sector %d' % candidate, file=sys.stderr)",
-              "                        return data",
-              "            sys.exit('not an ISO 9660 image: no primary volume descriptor in sectors 16-63; descriptors: %s' % found)",
-              "        sys.exit('not an ISO 9660 image: no primary volume descriptor at sector %d' % sector)",
-          ])
-          path.write_text(source[:start] + replacement + source[end:])
-          print("Patched ISO parser to scan valid volume descriptors in sectors 16-63.")
-          PY
 
       - name: Recompile and run a short native compatibility probe
         id: probe

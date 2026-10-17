@@ -19,14 +19,14 @@ jobs:
     name: Download private CHD and test native recompilation
     runs-on: ubuntu-24.04
     timeout-minutes: 90
-    env:
-      GAME_ASSETS_LINK: ${{ secrets.GAME_ASSETS_LINK }}
       UPSTREAM_COMMIT: c628ae843209f6e4cef34ec04efb6267a1618882
     steps:
       - name: Check out project desktop patches and launchers
         uses: actions/checkout@v4
 
       - name: Check required secret
+        env:
+          GAME_ASSETS_LINK: ${{ secrets.GAME_ASSETS_LINK }}
         shell: bash
         run: |
           if [[ -z "${GAME_ASSETS_LINK:-}" ]]; then
@@ -47,6 +47,8 @@ jobs:
             libxinerama-dev libxcursor-dev libxi-dev libwayland-dev libxkbcommon-dev
 
       - name: Download private CHD from MEGA
+        env:
+          GAME_ASSETS_LINK: ${{ secrets.GAME_ASSETS_LINK }}
         shell: bash
         run: |
           set -euo pipefail
@@ -237,6 +239,8 @@ jobs:
 
       - name: Prepare encrypted native build inputs
         if: success()
+        env:
+          GAME_ASSETS_LINK: ${{ secrets.GAME_ASSETS_LINK }}
         shell: bash
         run: |
           set -euo pipefail
@@ -269,6 +273,8 @@ jobs:
 
       - name: Offer encrypted ISO converted from the supplied CHD
         if: success()
+        env:
+          GAME_ASSETS_LINK: ${{ secrets.GAME_ASSETS_LINK }}
         shell: bash
         run: |
           set -euo pipefail
@@ -295,8 +301,6 @@ jobs:
     needs: native-probe
     runs-on: macos-15
     timeout-minutes: 120
-    env:
-      GAME_ASSETS_LINK: ${{ secrets.GAME_ASSETS_LINK }}
     steps:
       - name: Check out app launcher source
         uses: actions/checkout@v4
@@ -312,6 +316,8 @@ jobs:
         run: brew install cmake ninja llvm sdl2 gnupg
 
       - name: Decrypt and unpack native inputs
+        env:
+          GAME_ASSETS_LINK: ${{ secrets.GAME_ASSETS_LINK }}
         shell: bash
         run: |
           set -euo pipefail
@@ -342,6 +348,8 @@ jobs:
           test -x "$build/ps2run"
 
       - name: Package macOS app and encrypt it
+        env:
+          GAME_ASSETS_LINK: ${{ secrets.GAME_ASSETS_LINK }}
         shell: bash
         run: |
           set -euo pipefail
@@ -408,8 +416,6 @@ jobs:
     needs: native-probe
     runs-on: windows-latest
     timeout-minutes: 120
-    env:
-      GAME_ASSETS_LINK: ${{ secrets.GAME_ASSETS_LINK }}
     steps:
       - name: Check out app launcher source
         uses: actions/checkout@v4
@@ -435,6 +441,8 @@ jobs:
             zip
 
       - name: Decrypt and unpack native inputs
+        env:
+          GAME_ASSETS_LINK: ${{ secrets.GAME_ASSETS_LINK }}
         shell: msys2 {0}
         run: |
           set -euo pipefail
@@ -468,6 +476,8 @@ jobs:
           test -f "$build/ps2run.exe"
 
       - name: Package Windows app and encrypt it
+        env:
+          GAME_ASSETS_LINK: ${{ secrets.GAME_ASSETS_LINK }}
         shell: msys2 {0}
         run: |
           set -euo pipefail

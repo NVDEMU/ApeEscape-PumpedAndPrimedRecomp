@@ -1,21 +1,36 @@
 # Ape Escape: Pumped & Primed Recomp
 
-Experimental native recompilation compatibility probe using the upstream [PS2 Web Recomp](https://github.com/snuri00/ps2-web-recomp) toolchain.
+Experimental **native desktop recompilation** for Ape Escape: Pumped & Primed, using the upstream [PS2 Web Recomp](https://github.com/snuri00/ps2-web-recomp) toolchain.
 
 ## Status
 
-This is an early feasibility test, not a confirmed playable port. The first milestone is to check whether the game image can be parsed, translated, and started in the native runner.
+The game image has been parsed and the pinned toolchain completed the Linux native recompilation/exploration pipeline. The desktop workflow now attempts native Windows and macOS builds with SDL windows and platform GPU surfaces (Win32/D3D and Cocoa/Metal). A successful compile is not yet proof of full playability; boot, menus, graphics, audio, controller input, and longer gameplay still need testing.
 
-## Run the private probe
+This project targets **native Windows and macOS applications, not a browser build**.
 
-Add a repository Actions secret named `GAME_ASSETS_LINK` containing a public MEGA **file** link to your CHD, then open **Actions → Pumped & Primed native recomp probe → Run workflow**. A push that changes the workflow also triggers an initial run.
+## Build
 
-The workflow downloads the CHD only into temporary runner storage, converts it to ISO, and tries a short native recompilation run. It intentionally does not upload the disc image, generated game code, binaries, screenshots, or game-derived build files as artifacts.
+1. Add a repository Actions secret named `GAME_ASSETS_LINK` containing the MEGA file link to your own CHD dump.
+2. Open **Actions → Ape Escape: Pumped & Primed — Native Desktop Builds → Run workflow**, or push a change to the workflow file.
+3. Check the run’s individual platform jobs. A completed green job means that platform’s app bundle compiled and was packaged; it does not guarantee the game is fully playable.
 
-If a run fails, inspect the diagnostic summary in the Actions log. Common early blockers include an invalid/expired MEGA share link, exhausted MEGA transfer quota, a CHD that is not a DVD image, or an unsupported PS2 system call / graphics feature.
+The app asks you to select a compatible ISO at launch. The workflow also attempts to provide an optional encrypted ISO converted from the configured CHD, so you don’t have to convert it yourself.
+
+## Downloading encrypted artifacts
+
+This repository is public, so game-specific build outputs are uploaded **encrypted with AES-256**, not as public unencrypted executables. The passphrase is the exact MEGA file-link string stored in `GAME_ASSETS_LINK`.
+
+Download the artifact from the completed workflow run, extract the artifact’s ZIP wrapper, and decrypt the enclosed file with GnuPG, entering that same MEGA link when prompted. For example:
+
+```sh
+gpg --output ApeEscape-PumpedAndPrimed-macOS.dmg --decrypt ApeEscape-PumpedAndPrimed-macOS.dmg.gpg
+gpg --output ApeEscape-PumpedAndPrimed-Windows.zip --decrypt ApeEscape-PumpedAndPrimed-Windows.zip.gpg
+```
+
+If you use the optional disc artifact, decrypt `pumped-primed-disc.iso.gz.gpg` to `pumped-primed.iso.gz`, then run `gunzip pumped-primed.iso.gz`. Choose the resulting ISO in the app’s file picker. Artifacts have a short retention period, so download them soon after a successful run.
 
 ## Legal and attribution
 
-Use a game image you are legally entitled to use. This repository does not include the original game data. Keep generated game-specific code and binaries private and do not publish them. See the upstream toolchain's [legal notes](https://github.com/snuri00/ps2-web-recomp#legal).
+Use a game image you are legally entitled to use. The repository does not commit the original disc image or generated game-specific code. Keep generated game-specific code and binaries private and do not publish decrypted build outputs. See the upstream toolchain’s [legal notes](https://github.com/snuri00/ps2-web-recomp#legal).
 
 Ape Escape and related names are trademarks of their respective owners. This is an independent experimental project and is not affiliated with or endorsed by Sony or the game's publisher.

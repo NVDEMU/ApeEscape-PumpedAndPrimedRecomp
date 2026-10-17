@@ -105,6 +105,31 @@ jobs:
           test -s "$RUNNER_TEMP/pumped-primed.iso"
           chmod 600 "$RUNNER_TEMP/pumped-primed.iso"
           echo "CHD converted successfully (ISO size: $(stat -c '%s' "$RUNNER_TEMP/pumped-primed.iso") bytes)."
+          echo "CHD metadata:"
+          cat "$RUNNER_TEMP/chd-info.txt"
+          python3 - "$RUNNER_TEMP/pumped-primed.iso" <<'PY'
+          import os, sys
+          path = sys.argv[1]
+          sector_size = 2048
+          descriptors = []
+          with open(path, "rb") as f:
+              size = os.path.getsize(path)
+              for sector in range(16, min(64, size // sector_size)):
+                  f.seek(sector * sector_size)
+                  header = f.read(7)
+                  if len(header) == 7 and header[1:6] == b"CD001":
+                      descriptors.append((sector, header[0], header[6]))
+          print("ISO9660 volume descriptors in sectors 16-63:",
+                [(s, t, v) for s, t, v in descriptors])
+          if not any(t == 1 and v == 1 for _, t, v in descriptors):
+              with open(path, "rb") as f:
+                  f.seek(16 * sector_size)
+                  print("Sector-16 header bytes:", f.read(16).hex())
+              raise SystemExit(
+                  "No ISO9660 primary volume descriptor (type 1, CD001, version 1) "
+                  "found in sectors 16-63; see CHD metadata and header diagnostics above."
+              )
+          PY
           rm -f "$RUNNER_TEMP/pumped-primed.chd"
 
       - name: Fetch pinned PS2 Web Recomp toolchain
@@ -114,6 +139,46 @@ jobs:
           git clone --filter=blob:none https://github.com/snuri00/ps2-web-recomp.git "$RUNNER_TEMP/ps2-web-recomp"
           git -C "$RUNNER_TEMP/ps2-web-recomp" checkout "$UPSTREAM_COMMIT"
           echo "Using upstream PS2 Web Recomp commit: $UPSTREAM_COMMIT"
+
+      - name: Handle a leading ISO boot-record descriptor
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - "$RUNNER_TEMP/ps2-web-recomp/scripts/disc.py" <<'PY'
+          from pathlib import Path
+          import sys
+          path = Path(sys.argv[1])
+          source = path.read_text()
+          old = '''    def pvd(self, sector):
+          data = self.read(sector, 1)
+          if data[:6] != b'\\x01CD001':
+              sys.exit('not an ISO 9660 image: no primary volume descriptor at sector %d' % sector)
+          return data
+          '''
+          new = '''    def pvd(self, sector):
+          data = self.read(sector, 1)
+          if data[:6] == b'\\x01CD001':
+              return data
+          # ISO 9660 permits a boot-record descriptor before the PVD.
+          # Some PS2 images put the PVD after sector 16, so scan the early
+          # descriptor sequence instead of assuming sector 16 must be type 1.
+          if sector == 16:
+              found = []
+              for candidate in range(16, min(64, self.size // SECTOR)):
+                  data = self.read(candidate, 1)
+                  if data[1:6] == b'CD001':
+                      found.append((candidate, data[0], data[6]))
+                      if data[0] == 1 and data[6] == 1:
+                          print('ISO primary volume descriptor found at sector %d' % candidate, file=sys.stderr)
+                          return data
+              sys.exit('not an ISO 9660 image: no primary volume descriptor in sectors 16-63; descriptors: %s' % found)
+          sys.exit('not an ISO 9660 image: no primary volume descriptor at sector %d' % sector)
+          '''
+          if old not in source:
+              raise SystemExit("Could not safely patch the expected upstream ISO parser; upstream source may have changed.")
+          path.write_text(source.replace(old, new, 1))
+          print("Added PVD scan for a valid leading boot-record descriptor.")
+          PY
 
       - name: Recompile and run a short native compatibility probe
         id: probe

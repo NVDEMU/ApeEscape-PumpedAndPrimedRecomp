@@ -18,12 +18,19 @@ The app asks you to select a compatible ISO at launch. The workflow also attempt
 
 ## Downloading encrypted artifacts
 
-This repository is public, so game-specific build outputs are uploaded **encrypted with AES-256**, not as public unencrypted executables. The passphrase is the exact MEGA file-link string stored in `GAME_ASSETS_LINK`.
+This repository is public, so game-specific build outputs are uploaded **encrypted with AES-256**, not as public unencrypted executables.
 
-Download the artifact from the completed workflow run, extract the artifact’s ZIP wrapper, and decrypt the enclosed file with GnuPG, entering that same MEGA link when prompted. For example:
+**A `.dmg.gpg` is not a disk image you can open yet.** It is the normal `.dmg` file encrypted with GnuPG. Do not just rename it. Download the artifact from the completed workflow run and extract GitHub's artifact ZIP wrapper first. Then decrypt the enclosed file using the exact MEGA link string stored in the repository's `GAME_ASSETS_LINK` secret as the passphrase.
+
+On macOS, install GnuPG if needed (`brew install gnupg`), then run this in Terminal from the folder containing the downloaded file. GnuPG will prompt for the passphrase:
 
 ```sh
 gpg --output ApeEscape-PumpedAndPrimed-macOS.dmg --decrypt ApeEscape-PumpedAndPrimed-macOS.dmg.gpg
+```
+
+Open the resulting `.dmg` normally. On Windows, install Gpg4win, then decrypt the `.zip.gpg` file the same way:
+
+```sh
 gpg --output ApeEscape-PumpedAndPrimed-Windows.zip --decrypt ApeEscape-PumpedAndPrimed-Windows.zip.gpg
 ```
 

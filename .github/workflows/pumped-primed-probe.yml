@@ -321,6 +321,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          export CXX="$(brew --prefix llvm)/bin/clang++"
           src="$RUNNER_TEMP/desktop-source/ps2-web-recomp"
           build="$src/build/native-pumped-primed"
           stage="$RUNNER_TEMP/macos-package"

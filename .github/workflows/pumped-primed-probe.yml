@@ -45,7 +45,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install --no-install-recommends -y \
             build-essential clang cmake ninja-build python3 git \
-            megatools mame-tools pkg-config gnupg \
+            megatools mame-tools pkg-config \
             libsdl2-dev libvulkan-dev libx11-dev libxrandr-dev \
             libxinerama-dev libxcursor-dev libxi-dev libwayland-dev libxkbcommon-dev
 
@@ -245,10 +245,8 @@ jobs:
           echo "No CHD, ISO, generated game code, executable, screenshots, or game-derived build artifacts are uploaded."
 
 
-      - name: Prepare encrypted native build inputs
+      - name: Prepare native build inputs
         if: success()
-        env:
-          GAME_ASSETS_LINK: ${{ secrets.GAME_ASSETS_LINK }}
         shell: bash
         run: |
           set -euo pipefail
@@ -263,43 +261,33 @@ jobs:
           rm -f "$src/games/pumped-primed/explore.log" "$src/games/pumped-primed/explore.ps2" "$src/games/pumped-primed/misses.txt"
 
           tar -czf "$RUNNER_TEMP/pumped-primed-desktop-input.tar.gz" -C "$RUNNER_TEMP" ps2-web-recomp
-          gpg --batch --yes --pinentry-mode loopback --passphrase "$GAME_ASSETS_LINK" \
-            --symmetric --cipher-algo AES256 --output "$RUNNER_TEMP/pumped-primed-desktop-input.tar.gz.gpg" \
-            "$RUNNER_TEMP/pumped-primed-desktop-input.tar.gz"
-          rm -f "$RUNNER_TEMP/pumped-primed-desktop-input.tar.gz"
-          echo "Native inputs encrypted before upload."
+          echo "Native build inputs prepared as a normal tar.gz artifact."
 
-      - name: Upload encrypted native build inputs
+      - name: Upload native build inputs
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: pumped-primed-desktop-input-encrypted
-          path: ${{ runner.temp }}/pumped-primed-desktop-input.tar.gz.gpg
+          name: pumped-primed-desktop-input
+          path: ${{ runner.temp }}/pumped-primed-desktop-input.tar.gz
           if-no-files-found: error
           retention-days: 1
           compression-level: 0
 
-      - name: Offer encrypted ISO converted from the supplied CHD
+      - name: Prepare optional ISO artifact from the supplied CHD
         if: success()
-        env:
-          GAME_ASSETS_LINK: ${{ secrets.GAME_ASSETS_LINK }}
         shell: bash
         run: |
           set -euo pipefail
-          gzip -1 -c "$RUNNER_TEMP/pumped-primed.iso" > "$RUNNER_TEMP/pumped-primed.iso.gz"
-          gpg --batch --yes --pinentry-mode loopback --passphrase "$GAME_ASSETS_LINK" \
-            --symmetric --cipher-algo AES256 --compress-algo none \
-            --output "$RUNNER_TEMP/pumped-primed-disc.iso.gz.gpg" "$RUNNER_TEMP/pumped-primed.iso.gz"
-          rm -f "$RUNNER_TEMP/pumped-primed.iso.gz"
-          echo "The optional ISO is encrypted separately from the application builds."
+          gzip -1 -c "$RUNNER_TEMP/pumped-primed.iso" > "$RUNNER_TEMP/pumped-primed-disc.iso.gz"
+          echo "Prepared an ordinary gzip-compressed ISO artifact."
 
-      - name: Upload optional encrypted ISO
+      - name: Upload optional ISO
         if: success()
         continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
-          name: pumped-primed-disc-iso-encrypted
-          path: ${{ runner.temp }}/pumped-primed-disc.iso.gz.gpg
+          name: pumped-primed-disc-iso
+          path: ${{ runner.temp }}/pumped-primed-disc.iso.gz
           if-no-files-found: warn
           retention-days: 1
           compression-level: 0
@@ -313,29 +301,22 @@ jobs:
       - name: Check out app launcher source
         uses: actions/checkout@v4
 
-      - name: Download encrypted build inputs
+      - name: Download native build inputs
         uses: actions/download-artifact@v4
         with:
-          name: pumped-primed-desktop-input-encrypted
+          name: pumped-primed-desktop-input
           path: ${{ runner.temp }}/desktop-input
 
       - name: Install native macOS dependencies
         shell: bash
-        run: brew install cmake ninja llvm sdl2 gnupg
+        run: brew install cmake ninja llvm sdl2
 
-      - name: Decrypt and unpack native inputs
-        env:
-          GAME_ASSETS_LINK: ${{ secrets.GAME_ASSETS_LINK }}
+      - name: Unpack native inputs
         shell: bash
         run: |
           set -euo pipefail
-          printf '::add-mask::%s\n' "$GAME_ASSETS_LINK"
-          gpg --batch --yes --pinentry-mode loopback --passphrase "$GAME_ASSETS_LINK" \
-            --decrypt --output "$RUNNER_TEMP/pumped-primed-desktop-input.tar.gz" \
-            "$RUNNER_TEMP/desktop-input/pumped-primed-desktop-input.tar.gz.gpg"
           mkdir -p "$RUNNER_TEMP/desktop-source"
-          tar -xzf "$RUNNER_TEMP/pumped-primed-desktop-input.tar.gz" -C "$RUNNER_TEMP/desktop-source"
-          rm -f "$RUNNER_TEMP/pumped-primed-desktop-input.tar.gz"
+          tar -xzf "$RUNNER_TEMP/desktop-input/pumped-primed-desktop-input.tar.gz" -C "$RUNNER_TEMP/desktop-source"
 
       - name: Build native recompiled runner
         shell: bash
@@ -355,9 +336,7 @@ jobs:
           cmake --build "$build" --target ps2run --parallel 3
           test -x "$build/ps2run"
 
-      - name: Package macOS app and encrypt it
-        env:
-          GAME_ASSETS_LINK: ${{ secrets.GAME_ASSETS_LINK }}
+      - name: Package macOS app
         shell: bash
         run: |
           set -euo pipefail
@@ -405,16 +384,13 @@ jobs:
 
           dmg="$RUNNER_TEMP/ApeEscape-PumpedAndPrimed-macOS.dmg"
           hdiutil create -volname "Ape Escape Pumped and Primed" -srcfolder "$app" -ov -format UDZO "$dmg"
-          gpg --batch --yes --pinentry-mode loopback --passphrase "$GAME_ASSETS_LINK" \
-            --symmetric --cipher-algo AES256 --output "$RUNNER_TEMP/ApeEscape-PumpedAndPrimed-macOS.dmg.gpg" "$dmg"
-          rm -f "$dmg"
-          echo "Encrypted native macOS DMG is ready."
+          echo "Native macOS DMG is ready: $dmg"
 
-      - name: Upload encrypted macOS app
+      - name: Upload macOS app
         uses: actions/upload-artifact@v4
         with:
-          name: pumped-primed-macos-app-encrypted
-          path: ${{ runner.temp }}/ApeEscape-PumpedAndPrimed-macOS.dmg.gpg
+          name: pumped-primed-macos-app
+          path: ${{ runner.temp }}/ApeEscape-PumpedAndPrimed-macOS.dmg
           if-no-files-found: error
           retention-days: 1
           compression-level: 0
@@ -428,13 +404,13 @@ jobs:
       - name: Check out app launcher source
         uses: actions/checkout@v4
 
-      - name: Download encrypted build inputs
+      - name: Download native build inputs
         uses: actions/download-artifact@v4
         with:
-          name: pumped-primed-desktop-input-encrypted
+          name: pumped-primed-desktop-input
           path: ${{ runner.temp }}\\desktop-input
 
-      - name: Set up MinGW UCRT64, SDL2, and GnuPG
+      - name: Set up MinGW UCRT64 and SDL2
         uses: msys2/setup-msys2@v2
         with:
           msystem: UCRT64
@@ -445,23 +421,15 @@ jobs:
             mingw-w64-ucrt-x86_64-cmake
             mingw-w64-ucrt-x86_64-ninja
             mingw-w64-ucrt-x86_64-SDL2
-            gnupg
             zip
 
-      - name: Decrypt and unpack native inputs
-        env:
-          GAME_ASSETS_LINK: ${{ secrets.GAME_ASSETS_LINK }}
+      - name: Unpack native inputs
         shell: msys2 {0}
         run: |
           set -euo pipefail
-          printf '::add-mask::%s\n' "$GAME_ASSETS_LINK"
           TEMP="$(cygpath -u "$RUNNER_TEMP")"
           mkdir -p "$TEMP/desktop-source"
-          gpg --batch --yes --pinentry-mode loopback --passphrase "$GAME_ASSETS_LINK" \
-            --decrypt --output "$TEMP/pumped-primed-desktop-input.tar.gz" \
-            "$TEMP/desktop-input/pumped-primed-desktop-input.tar.gz.gpg"
-          tar -xzf "$TEMP/pumped-primed-desktop-input.tar.gz" -C "$TEMP/desktop-source"
-          rm -f "$TEMP/pumped-primed-desktop-input.tar.gz"
+          tar -xzf "$TEMP/desktop-input/pumped-primed-desktop-input.tar.gz" -C "$TEMP/desktop-source"
 
       - name: Build native recompiled runner
         shell: msys2 {0}
@@ -483,9 +451,7 @@ jobs:
           cmake --build "$build" --target ps2run --parallel 2
           test -f "$build/ps2run.exe"
 
-      - name: Package Windows app and encrypt it
-        env:
-          GAME_ASSETS_LINK: ${{ secrets.GAME_ASSETS_LINK }}
+      - name: Package Windows app
         shell: msys2 {0}
         run: |
           set -euo pipefail
@@ -506,17 +472,13 @@ jobs:
 
           mkdir -p "$TEMP/windows-package"
           (cd "$TEMP/windows-package" && zip -0 -r "$TEMP/ApeEscape-PumpedAndPrimed-Windows.zip" "Ape Escape Pumped and Primed")
-          gpg --batch --yes --pinentry-mode loopback --passphrase "$GAME_ASSETS_LINK" \
-            --symmetric --cipher-algo AES256 --output "$TEMP/ApeEscape-PumpedAndPrimed-Windows.zip.gpg" \
-            "$TEMP/ApeEscape-PumpedAndPrimed-Windows.zip"
-          rm -f "$TEMP/ApeEscape-PumpedAndPrimed-Windows.zip"
-          echo "Encrypted native Windows ZIP is ready."
+          echo "Native Windows ZIP is ready: $TEMP/ApeEscape-PumpedAndPrimed-Windows.zip"
 
-      - name: Upload encrypted Windows app
+      - name: Upload Windows app
         uses: actions/upload-artifact@v4
         with:
-          name: pumped-primed-windows-app-encrypted
-          path: ${{ runner.temp }}/ApeEscape-PumpedAndPrimed-Windows.zip.gpg
+          name: pumped-primed-windows-app
+          path: ${{ runner.temp }}/ApeEscape-PumpedAndPrimed-Windows.zip
           if-no-files-found: error
           retention-days: 1
           compression-level: 0

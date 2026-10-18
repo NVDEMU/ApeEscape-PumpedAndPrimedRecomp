@@ -188,9 +188,16 @@ jobs:
           cmake_file="$TEMP/desktop-source/ps2-web-recomp/CMakeLists.txt"
           old='target_link_libraries(ps2runtime PUBLIC ws2_32 userenv bcrypt ole32 oleaut32 shell32 advapi32 d3d12 dxgi dxguid winmm setupapi rpcrt4 gdi32)'
           new='target_link_libraries(ps2runtime PUBLIC ws2_32 userenv bcrypt ole32 oleaut32 shell32 advapi32 d3d12 dxgi dxguid winmm setupapi rpcrt4 gdi32 ntdll)'
-          grep -Fqx "$old" "$cmake_file"
-          sed -i "s|$old|$new|" "$cmake_file"
-          grep -Fqx "$new" "$cmake_file"
+          if grep -Fq "$old" "$cmake_file"; then
+            sed -i "s|$old|$new|" "$cmake_file"
+          elif grep -Fq "$new" "$cmake_file"; then
+            echo "Windows NT native API dependency is already present."
+          else
+            echo "::error::Could not find the expected Windows target_link_libraries line."
+            grep 'target_link_libraries(ps2runtime PUBLIC ws2_32' "$cmake_file" || true
+            exit 1
+          fi
+          grep -Fq "$new" "$cmake_file"
 
       - name: Build native recompiled runner
         shell: msys2 {0}

@@ -242,7 +242,7 @@ jobs:
             echo "The pipeline did not start; inspect the earlier setup/download step."
           fi
           echo
-          echo "No CHD, ISO, generated game code, executable, screenshots, or game-derived build artifacts are uploaded."
+          echo "The source CHD and converted ISO are not uploaded. The app asks users to select their own compatible ISO."
 
 
       - name: Prepare native build inputs
@@ -270,25 +270,6 @@ jobs:
           name: pumped-primed-desktop-input
           path: ${{ runner.temp }}/pumped-primed-desktop-input.tar.gz
           if-no-files-found: error
-          retention-days: 1
-          compression-level: 0
-
-      - name: Prepare optional ISO artifact from the supplied CHD
-        if: success()
-        shell: bash
-        run: |
-          set -euo pipefail
-          gzip -1 -c "$RUNNER_TEMP/pumped-primed.iso" > "$RUNNER_TEMP/pumped-primed-disc.iso.gz"
-          echo "Prepared an ordinary gzip-compressed ISO artifact."
-
-      - name: Upload optional ISO
-        if: success()
-        continue-on-error: true
-        uses: actions/upload-artifact@v4
-        with:
-          name: pumped-primed-disc-iso
-          path: ${{ runner.temp }}/pumped-primed-disc.iso.gz
-          if-no-files-found: warn
           retention-days: 1
           compression-level: 0
 

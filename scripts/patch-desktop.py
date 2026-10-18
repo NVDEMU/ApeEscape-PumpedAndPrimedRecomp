@@ -161,7 +161,7 @@ replace_once(
         if(APPLE)
             target_link_libraries(ps2runtime PUBLIC "-framework Metal" "-framework QuartzCore" "-framework Foundation" "-framework CoreFoundation" "-framework IOKit" "-framework IOSurface" objc)
         elseif(WIN32)
-            target_link_libraries(ps2runtime PUBLIC ws2_32 userenv bcrypt ole32 oleaut32 shell32 advapi32 d3d12 dxgi dxguid winmm setupapi rpcrt4 gdi32)
+            target_link_libraries(ps2runtime PUBLIC ws2_32 userenv bcrypt ole32 oleaut32 shell32 advapi32 d3d12 dxgi dxguid winmm setupapi rpcrt4 gdi32 ntdll)
         else()
             target_link_libraries(ps2runtime PUBLIC dl pthread m)
         endif()

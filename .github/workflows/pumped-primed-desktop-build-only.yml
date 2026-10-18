@@ -180,6 +180,18 @@ jobs:
           tar -xzf "$TEMP/pumped-primed-desktop-input.tar.gz" -C "$TEMP/desktop-source"
           rm -f "$TEMP/pumped-primed-desktop-input.tar.gz"
 
+      - name: Add missing Windows NT native API library
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          TEMP="$(cygpath -u "$RUNNER_TEMP")"
+          cmake_file="$TEMP/desktop-source/ps2-web-recomp/CMakeLists.txt"
+          old='target_link_libraries(ps2runtime PUBLIC ws2_32 userenv bcrypt ole32 oleaut32 shell32 advapi32 d3d12 dxgi dxguid winmm setupapi rpcrt4 gdi32)'
+          new='target_link_libraries(ps2runtime PUBLIC ws2_32 userenv bcrypt ole32 oleaut32 shell32 advapi32 d3d12 dxgi dxguid winmm setupapi rpcrt4 gdi32 ntdll)'
+          grep -Fqx "$old" "$cmake_file"
+          sed -i "s|$old|$new|" "$cmake_file"
+          grep -Fqx "$new" "$cmake_file"
+
       - name: Build native recompiled runner
         shell: msys2 {0}
         run: |
